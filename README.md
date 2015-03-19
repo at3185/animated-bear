@@ -10,3 +10,4 @@ Follow steps 1 through 6 on this page https://developers.google.com/google-apps/
 For subsequent runs there will be no more user interaction.
 
 
+Note: Project is already configured for Eclipse 4.4.1+ with Maven plugin used to resolve library dependencies.
