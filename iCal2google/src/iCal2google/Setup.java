@@ -6,8 +6,10 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.security.GeneralSecurityException;
 import java.text.ParseException;
+import java.text.SimpleDateFormat;
 import java.util.Collections;
 import java.util.Date;
+import java.util.Iterator;
 import java.util.List;
 
 import biweekly.Biweekly;
@@ -29,24 +31,37 @@ import com.google.api.services.calendar.model.Event;
 import com.google.api.services.calendar.model.EventDateTime;
 
 public class Setup {
-	Calendar service;
+	private Calendar service;
+	private MyProperties prop = new MyProperties();
 
-	public void setUp() throws IOException, GeneralSecurityException {
-		boolean use_refresh = true;
+	public Setup() throws IOException, GeneralSecurityException {
+		connectToService();
+	}
+
+	public void connectToService() throws IOException, GeneralSecurityException {
 		HttpTransport httpTransport = GoogleNetHttpTransport.newTrustedTransport();
 		JacksonFactory jsonFactory = JacksonFactory.getDefaultInstance();
 
-		// The clientId and clientSecret can be found in Google Developers
-		// Console
-		String clientId = "CLIENT_ID";
-		String clientSecret = "CLIENT_SECRET";
+		// The clientId and clientSecret can be found in Google Developers Console
+		String clientId = prop.getProperty(prop.CLIENT_ID);
+		if (clientId == null || clientId.isEmpty()) {
+			System.err.println(prop.CLIENT_ID + " incorrectly set!");
+			prop.resetConfig();
+		}
+		String clientSecret = prop.getProperty(prop.CLIENT_SECRET);
+		if (clientSecret == null || clientSecret.isEmpty()) {
+			System.err.println(prop.CLIENT_SECRET + " incorrectly set!");
+			prop.resetConfig();
+		}
 
 		// Or your redirect URL for web based applications.
 		String redirectUrl = "urn:ietf:wg:oauth:2.0:oob";
 		String scope = "https://www.googleapis.com/auth/calendar";
 		GoogleTokenResponse response = null;
-		if (!use_refresh) {
 
+		String refreshTokenStr = prop.getProperty(prop.REFRESH_KEY);
+
+		if (refreshTokenStr == null || refreshTokenStr.isEmpty()) {
 			GoogleAuthorizationCodeFlow flow = new GoogleAuthorizationCodeFlow.Builder(httpTransport, jsonFactory,
 					clientId, clientSecret, Collections.singleton(scope)).setAccessType("offline")
 					.setApprovalPrompt("force").build();
@@ -63,14 +78,13 @@ public class Setup {
 			String code = in.readLine();
 			// End of Step 1
 
-			// Step 2: Exchange
+			// Step 2: Get and save refresh token
 			response = flow.newTokenRequest(code).setRedirectUri(redirectUrl).execute();
-			System.out.println("Refresh token is " + response.getRefreshToken());
-
+			refreshTokenStr = response.getRefreshToken();
+			prop.setProperty(prop.REFRESH_KEY, refreshTokenStr);
+			prop.updatePropertiesFile();
 		} else {
-
-			String refreshTokenStr = "REFRESH_TOK";
-
+			// If we have the refresh token user intervention is not needed anymore to get the access token
 			try {
 				response = new GoogleRefreshTokenRequest(httpTransport, jsonFactory, refreshTokenStr, clientId,
 						clientSecret).execute();
@@ -89,47 +103,69 @@ public class Setup {
 				}
 			}
 		}
-
 		// End of Step 2
 		Credential credential = new GoogleCredential.Builder().setTransport(httpTransport).setJsonFactory(jsonFactory)
 				.setClientSecrets(clientId, clientSecret).build().setFromTokenResponse(response);
 
-		service = new Calendar.Builder(httpTransport, jsonFactory, credential).setApplicationName("APP_NAME").build();
+		service = new Calendar.Builder(httpTransport, jsonFactory, credential).setApplicationName("mycal").build();
 	}
 
 	public void execute() throws IOException, GeneralSecurityException, ParseException {
 		// login and initialize service
-		setUp();
-
+		connectToService();
 		// clear calendar
 		service.calendars().clear("primary").execute();
 
 		// open Ical file and parse all entries to icals var
-		File file = new File("C:\\Users\\eiontol\\Desktop\\ITC.ics");
+		File file = new File("C:\\Users\\" + System.getProperty("user.name") + "\\myCal.ics");
+		SimpleDateFormat df = new SimpleDateFormat("EEE MMM dd HH:mm:ss zzz yyyy");
 		List<ICalendar> icals = Biweekly.parse(file).all();
-
+		Integer numEventsAdded = 0;
 		for (int i = 0; i < icals.size(); i++) {
 			List<VEvent> events = icals.get(i).getEvents();
 			for (int j = 0; j < events.size(); j++) {
-				//extract information from events
+				// extract information from events
 				String summary = events.get(j).getSummary().getValue();
-				Date startTime = events.get(j).getDateStart().getValue().getRawComponents().toDate();
-				Date endTime = events.get(j).getDateEnd().getValue().getRawComponents().toDate();
-				
-				//create Google API specific event and populate it 
+				// convert biweekly date object to standard Date
+				Date startTime = df.parse(events.get(j).getDateStart().getValue().toString());
+				Date endTime = df.parse(events.get(j).getDateEnd().getValue().toString());
+
+				// create Google API specific event and populate it
 				Event event = new Event();
 				event.setSummary(summary);
-				event.setStart(new EventDateTime().setDateTime(new DateTime(startTime.getTime())));
-				event.setEnd(new EventDateTime().setDateTime(new DateTime(endTime.getTime())));
 
-				System.out.println("Summary is " + summary);
-				System.out.println("pretty start time is " + event.getStart().toPrettyString());
-				
-				//Save to calendar
-				service.events().insert("primary", event).execute();
+				// if event is recurrent then insert each recurrence otherwise
+				// insert it once
+				// NOTE: alternatively can use RRULE to google and make it a
+				// single call, for example
+				// "event.setRecurrence(Arrays.asList("RRULE:FREQ=WEEKLY;UNTIL=20110701T170000Z"));"
+				if (events.get(j).getRecurrenceRule() != null) {
+					Iterator<Date> startTimeRec = events.get(j).getRecurrenceRule().getDateIterator(startTime);
+					Iterator<Date> endTimeRec = events.get(j).getRecurrenceRule().getDateIterator(endTime);
+					while (startTimeRec.hasNext()) {
+						event.setStart(new EventDateTime().setDateTime(new DateTime(startTimeRec.next().getTime())));
+						event.setEnd(new EventDateTime().setDateTime(new DateTime(endTimeRec.next().getTime())));
+						insertEvent(event);
+						numEventsAdded++;
+					}
+
+				} else {
+					event.setStart(new EventDateTime().setDateTime(new DateTime(startTime.getTime())));
+					event.setEnd(new EventDateTime().setDateTime(new DateTime(endTime.getTime())));
+					insertEvent(event);
+					numEventsAdded++;
+				}
 			}
 		}
-		
-		
+
+		System.out.println(numEventsAdded.toString() + " events added!");
+	}
+
+	void insertEvent(Event event) throws IOException {
+		System.out.println("pretty start time is " + event.getStart().toPrettyString() + " for event "
+				+ event.getSummary());
+
+		// Save to calendar
+		service.events().insert("primary", event).execute();
 	}
 }
