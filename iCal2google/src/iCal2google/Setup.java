@@ -15,6 +15,8 @@ import java.util.List;
 import biweekly.Biweekly;
 import biweekly.ICalendar;
 import biweekly.component.VEvent;
+import biweekly.property.Location;
+import biweekly.property.Summary;
 
 import com.google.api.client.auth.oauth2.Credential;
 import com.google.api.client.auth.oauth2.TokenResponseException;
@@ -42,16 +44,17 @@ public class Setup {
 		HttpTransport httpTransport = GoogleNetHttpTransport.newTrustedTransport();
 		JacksonFactory jsonFactory = JacksonFactory.getDefaultInstance();
 
-		// The clientId and clientSecret can be found in Google Developers Console
+		// The clientId and clientSecret can be found in Google Developers
+		// Console
 		String clientId = prop.getProperty(prop.CLIENT_ID);
 		if (clientId == null || clientId.isEmpty()) {
 			System.err.println(prop.CLIENT_ID + " incorrectly set!");
-			prop.resetConfig();
+			prop.deletePropFile();
 		}
 		String clientSecret = prop.getProperty(prop.CLIENT_SECRET);
 		if (clientSecret == null || clientSecret.isEmpty()) {
 			System.err.println(prop.CLIENT_SECRET + " incorrectly set!");
-			prop.resetConfig();
+			prop.deletePropFile();
 		}
 
 		// Or your redirect URL for web based applications.
@@ -82,13 +85,14 @@ public class Setup {
 			response = flow.newTokenRequest(code).setRedirectUri(redirectUrl).execute();
 			refreshTokenStr = response.getRefreshToken();
 			prop.setProperty(prop.REFRESH_KEY, refreshTokenStr);
-			prop.updatePropertiesFile();
 		} else {
-			// If we have the refresh token user intervention is not needed anymore to get the access token
+			// If we have the refresh token user intervention is not needed
+			// anymore to get the access token
 			try {
 				response = new GoogleRefreshTokenRequest(httpTransport, jsonFactory, refreshTokenStr, clientId,
 						clientSecret).execute();
-				System.out.println("Access token: " + response.getAccessToken());
+				// System.out.println("Access token: " +
+				// response.getAccessToken());
 			} catch (TokenResponseException e) {
 				if (e.getDetails() != null) {
 					System.err.println("Error: " + e.getDetails().getError());
@@ -113,8 +117,10 @@ public class Setup {
 	public void execute() throws IOException, GeneralSecurityException, ParseException {
 		// login and initialize service
 		connectToService();
-		// clear calendar
-		service.calendars().clear("primary").execute();
+		String calID = getCalID();
+
+		// clear all events in selected calendar
+		clearEvents(calID);
 
 		// open Ical file and parse all entries to icals var
 		File file = new File("C:\\Users\\" + System.getProperty("user.name") + "\\myCal.ics");
@@ -124,15 +130,21 @@ public class Setup {
 		for (int i = 0; i < icals.size(); i++) {
 			List<VEvent> events = icals.get(i).getEvents();
 			for (int j = 0; j < events.size(); j++) {
-				// extract information from events
-				String summary = events.get(j).getSummary().getValue();
 				// convert biweekly date object to standard Date
 				Date startTime = df.parse(events.get(j).getDateStart().getValue().toString());
 				Date endTime = df.parse(events.get(j).getDateEnd().getValue().toString());
 
 				// create Google API specific event and populate it
 				Event event = new Event();
-				event.setSummary(summary);
+
+				// extract summary and put it google event
+				Summary summary = events.get(j).getSummary();
+				if (summary != null)
+					event.setSummary(summary.getValue());
+				// extract location and put it google event
+				Location location = events.get(j).getLocation();
+				if (location != null)
+					event.setLocation(location.getValue());
 
 				// if event is recurrent then insert each recurrence otherwise
 				// insert it once
@@ -145,14 +157,14 @@ public class Setup {
 					while (startTimeRec.hasNext()) {
 						event.setStart(new EventDateTime().setDateTime(new DateTime(startTimeRec.next().getTime())));
 						event.setEnd(new EventDateTime().setDateTime(new DateTime(endTimeRec.next().getTime())));
-						insertEvent(event);
+						insertEvent(calID, event);
 						numEventsAdded++;
 					}
 
 				} else {
 					event.setStart(new EventDateTime().setDateTime(new DateTime(startTime.getTime())));
 					event.setEnd(new EventDateTime().setDateTime(new DateTime(endTime.getTime())));
-					insertEvent(event);
+					insertEvent(calID, event);
 					numEventsAdded++;
 				}
 			}
@@ -161,11 +173,73 @@ public class Setup {
 		System.out.println(numEventsAdded.toString() + " events added!");
 	}
 
-	void insertEvent(Event event) throws IOException {
+	
+	// insert an event to calendar; add printout before doing the insertion
+	void insertEvent(String calID, Event event) throws IOException {
 		System.out.println("pretty start time is " + event.getStart().toPrettyString() + " for event "
 				+ event.getSummary());
 
 		// Save to calendar
-		service.events().insert("primary", event).execute();
+		service.events().insert(calID, event).execute();
+	}
+
+	
+	// Get calendar ID from properties file. Or create it for the first time if
+	// ID is not valid.
+	String getCalID() {
+		com.google.api.services.calendar.model.Calendar calendar = null;
+		String calID = prop.getProperty(prop.CALID);
+		boolean createCal = false;
+		if (calID != null) {
+			try {
+				service.calendars().get(calID).execute();
+			} catch (IOException e) {
+				System.out.println("Could not find calendar by ID! Creating a new one..");
+				createCal = true;
+			}
+		}
+
+		if (createCal || calID == null) {
+			// Create a new calendar
+			calendar = new com.google.api.services.calendar.model.Calendar();
+			calendar.setSummary("-E-");
+			calendar.setTimeZone("Europe/Stockholm");
+			// Insert the new calendar
+			try {
+				calendar = service.calendars().insert(calendar).execute();
+				calID = calendar.getId();
+				//save new calendar ID to properties file
+				prop.setProperty(prop.CALID, calID);
+			} catch (IOException e1) {
+				System.err.println("Could not insert new calendar to calendars list!");
+				e1.printStackTrace();
+				System.exit(1);
+			}
+		}
+		return calID;
+	}
+
+	
+	//delete all events in selected calendar
+	void clearEvents(String calID) {
+		// Iterate over the events in the specified calendar
+		String pageToken = null;
+		do {
+			com.google.api.services.calendar.model.Events events = null;
+			try {
+				events = service.events().list(calID).setPageToken(pageToken).execute();
+			} catch (IOException e) {
+				e.printStackTrace();
+			}
+		  List<Event> items = events.getItems();
+		  for (Event event : items) {
+		    try {
+				service.events().delete(calID, event.getId()).execute();
+			} catch (IOException e) {
+				e.printStackTrace();
+			}
+		  }
+		  pageToken = events.getNextPageToken();
+		} while (pageToken != null);
 	}
 }
