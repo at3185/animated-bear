@@ -15,6 +15,7 @@ import java.util.List;
 import biweekly.Biweekly;
 import biweekly.ICalendar;
 import biweekly.component.VEvent;
+import biweekly.property.Description;
 import biweekly.property.Location;
 import biweekly.property.Summary;
 
@@ -121,7 +122,7 @@ public class Setup {
 
 		// clear all events in selected calendar
 		clearEvents(calID);
-
+		
 		// open Ical file and parse all entries to icals var
 		File file = new File("C:\\Users\\" + System.getProperty("user.name") + "\\myCal.ics");
 		SimpleDateFormat df = new SimpleDateFormat("EEE MMM dd HH:mm:ss zzz yyyy");
@@ -145,6 +146,9 @@ public class Setup {
 				Location location = events.get(j).getLocation();
 				if (location != null)
 					event.setLocation(location.getValue());
+				Description description = events.get(j).getDescription();
+				if (description != null)
+					event.setDescription(description.getValue());
 
 				// if event is recurrent then insert each recurrence otherwise
 				// insert it once
@@ -210,6 +214,7 @@ public class Setup {
 				calID = calendar.getId();
 				//save new calendar ID to properties file
 				prop.setProperty(prop.CALID, calID);
+				System.out.println("New calendar created!");
 			} catch (IOException e1) {
 				System.err.println("Could not insert new calendar to calendars list!");
 				e1.printStackTrace();
