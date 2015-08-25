@@ -116,6 +116,9 @@ public class Setup {
 	}
 
 	public void execute() throws IOException, GeneralSecurityException, ParseException {
+		//used to keep track of number of events added to calendar
+		Integer numEventsAdded = 0;
+		
 		// login and initialize service
 		connectToService();
 		String calID = getCalID();
@@ -127,9 +130,11 @@ public class Setup {
 		File file = new File("C:\\Users\\" + System.getProperty("user.name") + "\\myCal.ics");
 		SimpleDateFormat df = new SimpleDateFormat("EEE MMM dd HH:mm:ss zzz yyyy");
 		List<ICalendar> icals = Biweekly.parse(file).all();
-		Integer numEventsAdded = 0;
+		
+		//for each calendar in the ical file..
 		for (int i = 0; i < icals.size(); i++) {
 			List<VEvent> events = icals.get(i).getEvents();
+			//for each event in the calendar..
 			for (int j = 0; j < events.size(); j++) {
 				// convert biweekly date object to standard Date
 				Date startTime = df.parse(events.get(j).getDateStart().getValue().toString());
@@ -180,8 +185,8 @@ public class Setup {
 	
 	// insert an event to calendar; add printout before doing the insertion
 	void insertEvent(String calID, Event event) throws IOException {
-		System.out.println("pretty start time is " + event.getStart().toPrettyString() + " for event "
-				+ event.getSummary());
+		System.out.println("Inserting at time " + event.getStart().toPrettyString() + " event \""
+				+ event.getSummary() + "\"");
 
 		// Save to calendar
 		service.events().insert(calID, event).execute();
