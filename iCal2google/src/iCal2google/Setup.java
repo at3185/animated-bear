@@ -6,7 +6,6 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.security.GeneralSecurityException;
 import java.text.ParseException;
-import java.text.SimpleDateFormat;
 import java.util.Collections;
 import java.util.Date;
 import java.util.Iterator;
@@ -128,7 +127,6 @@ public class Setup {
 		
 		// open Ical file and parse all entries to icals var
 		File file = new File("C:\\Users\\" + System.getProperty("user.name") + "\\myCal.ics");
-		SimpleDateFormat df = new SimpleDateFormat("EEE MMM dd HH:mm:ss zzz yyyy");
 		List<ICalendar> icals = Biweekly.parse(file).all();
 		
 		//for each calendar in the ical file..
@@ -137,8 +135,10 @@ public class Setup {
 			//for each event in the calendar..
 			for (int j = 0; j < events.size(); j++) {
 				// convert biweekly date object to standard Date
-				Date startTime = df.parse(events.get(j).getDateStart().getValue().toString());
-				Date endTime = df.parse(events.get(j).getDateEnd().getValue().toString());
+//				Date startTime = df.parse(events.get(j).getDateStart().getValue().toString());
+//				Date endTime = df.parse(events.get(j).getDateEnd().getValue().toString());
+				Date startTime = new Date(events.get(j).getDateStart().getValue().getTime());
+				Date endTime = new Date(events.get(j).getDateEnd().getValue().getTime());
 
 				// create Google API specific event and populate it
 				Event event = new Event();
